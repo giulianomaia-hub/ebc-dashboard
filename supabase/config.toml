@@ -1,0 +1,2 @@
+[functions.monitoring-data]
+verify_jwt = true
