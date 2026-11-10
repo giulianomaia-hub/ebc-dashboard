@@ -39,3 +39,138 @@
   .side-brand { justify-content: center; padding: 0 0 30px; }
   .side-brand-logo { width: 42px; height: auto; object-fit: contain; }
 }
+
+/* === Atlantis Infra Monitor: gauges compactos === */
+.nav-item {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+}
+
+.gauge-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  align-items: stretch;
+}
+
+.gauge-card {
+  min-width: 0;
+  min-height: 174px;
+  padding: 9px 10px 7px;
+  background: #181b1f;
+  border: 1px solid #343a40;
+  border-radius: 2px;
+}
+
+.gauge-title {
+  margin-bottom: 2px;
+  color: #d8d9da;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.gauge-svg {
+  display: block;
+  width: 100%;
+  max-width: 260px;
+  height: 112px;
+  margin: 0 auto;
+}
+
+.gauge-value {
+  font: 500 19px 'DM Sans', sans-serif;
+}
+
+.gauge-detail {
+  margin-top: -2px;
+  color: #8b949e;
+  font-size: 10px;
+  text-align: center;
+}
+
+.gauge-grid .metric-card {
+  min-width: 0;
+  background: #181b1f;
+  border: 1px solid #343a40;
+  border-radius: 2px;
+}
+
+.performance-controls {
+  display: flex;
+  gap: 12px;
+  align-items: end;
+  margin: 10px 0 18px;
+  padding: 12px;
+  background: #111d2d;
+  border: 1px solid #26364c;
+  border-radius: 8px;
+}
+
+.performance-controls label {
+  display: grid;
+  gap: 6px;
+  color: #9aa9bd;
+  font-size: 11px;
+}
+
+.performance-controls select {
+  min-width: 180px;
+  padding: 9px 11px;
+  background: #181b1f;
+  border: 1px solid #343a40;
+  border-radius: 4px;
+  color: #e8eef7;
+  font: inherit;
+}
+
+.performance-kpis {
+  margin-bottom: 16px;
+}
+
+.performance-kpis .metric-card {
+  background: #181b1f;
+  border-color: #343a40;
+  border-radius: 3px;
+}
+
+.performance-kpis .metric-value {
+  color: #73bf69;
+}
+
+.two-columns .chart-panel {
+  min-width: 0;
+}
+
+@media (max-width: 1050px) {
+  .gauge-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 700px) {
+  .gauge-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .gauge-card {
+    min-height: 150px;
+    padding: 8px;
+  }
+
+  .gauge-svg {
+    height: 95px;
+  }
+
+  .performance-controls {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .performance-controls select {
+    width: 100%;
+  }
+}
