@@ -176,36 +176,44 @@
 }
 
 
-/* Legendas compactas dos gráficos Recharts */
-.chart-panel .recharts-default-legend {
-  display: flex !important;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-items: center;
-  gap: 2px 9px;
-  padding: 4px 2px 0 !important;
-  margin: 0 auto;
-  max-width: 100%;
-}
-.chart-panel .recharts-legend-item {
-  margin: 0 !important;
-  line-height: 12px !important;
-  white-space: nowrap;
-}
-.chart-panel .recharts-legend-item-text {
-  color: #aebdd0 !important;
-  font-size: 9px !important;
-  font-weight: 400;
-}
-.chart-panel .recharts-legend-item svg {
-  width: 8px !important;
-  height: 8px !important;
-  vertical-align: middle;
-}
-.chart-panel .recharts-wrapper {
-  min-width: 0;
-}
-@media (max-width: 700px) {
-  .chart-panel .recharts-legend-item-text { font-size: 8px !important; }
-  .chart-panel .recharts-default-legend { gap: 2px 6px; }
-}
+/* Legendas compactas e consistentes nos gráficos Recharts */
+.recharts-default-legend { display:flex !important; flex-wrap:wrap !important; justify-content:center !important; gap:2px 8px !important; padding:0 !important; margin:0 !important; }
+.recharts-legend-item { margin:0 !important; line-height:1.1 !important; }
+.recharts-legend-item-text { font-size:9px !important; color:#aebdd0 !important; }
+.recharts-legend-wrapper { overflow:visible !important; }
+.recharts-cartesian-axis-tick-value { font-size:9px; }
+.trace-panel { min-width:0; }
+.trace-kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; margin-top:14px; }
+.trace-kpi { min-width:0; min-height:72px; border:1px solid #2a3b52; border-radius:7px; padding:8px 9px; display:grid; grid-template-columns:1fr auto; align-items:center; column-gap:4px; }
+.trace-kpi span { grid-column:1 / -1; color:#b6c5d8; font-size:9px; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.trace-kpi strong { color:#f2f6fb; font:700 19px Manrope,sans-serif; letter-spacing:-.5px; }
+.trace-kpi small { color:#a7b6ca; font-size:9px; text-align:right; }
+.trace-kpi.blue { background:linear-gradient(120deg,#183c75,#20599b); }
+.trace-kpi.green { background:linear-gradient(120deg,#20583b,#2e754b); }
+.trace-kpi.red { background:linear-gradient(120deg,#542e39,#713d49); }
+.trace-chart { height:135px; margin-top:8px; }
+.trace-note { color:#71839a; font-size:9px; line-height:1.35; margin-top:2px; }
+.trace-unavailable { min-height:180px; display:grid; place-items:center; text-align:center; color:#aebdd0; font-size:11px; padding:18px; }
+@media(max-width:900px) { .trace-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:700px) { .trace-kpi { min-height:66px; padding:7px; } .trace-kpi strong { font-size:17px; } .trace-chart { height:145px; } .recharts-legend-item-text { font-size:8px !important; } }
+
+/* Legendas compactas e consistentes nos gráficos Recharts */
+.recharts-default-legend { display:flex !important; flex-wrap:wrap !important; justify-content:center !important; gap:2px 8px !important; padding:0 !important; margin:0 !important; }
+.recharts-legend-item { margin:0 !important; line-height:1.1 !important; }
+.recharts-legend-item-text { font-size:9px !important; color:#aebdd0 !important; }
+.recharts-legend-wrapper { overflow:visible !important; }
+.recharts-cartesian-axis-tick-value { font-size:9px; }
+.trace-panel { min-width:0; }
+.trace-kpis { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:7px; margin-top:14px; }
+.trace-kpi { min-width:0; min-height:72px; border:1px solid #2a3b52; border-radius:7px; padding:8px 9px; display:grid; grid-template-columns:1fr auto; align-items:center; column-gap:4px; }
+.trace-kpi span { grid-column:1 / -1; color:#b6c5d8; font-size:9px; line-height:1.2; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.trace-kpi strong { color:#f2f6fb; font:700 19px Manrope,sans-serif; letter-spacing:-.5px; }
+.trace-kpi small { color:#a7b6ca; font-size:9px; text-align:right; }
+.trace-kpi.blue { background:linear-gradient(120deg,#183c75,#20599b); }
+.trace-kpi.green { background:linear-gradient(120deg,#20583b,#2e754b); }
+.trace-kpi.red { background:linear-gradient(120deg,#542e39,#713d49); }
+.trace-chart { height:135px; margin-top:8px; }
+.trace-note { color:#71839a; font-size:9px; line-height:1.35; margin-top:2px; }
+.trace-unavailable { min-height:180px; display:grid; place-items:center; text-align:center; color:#aebdd0; font-size:11px; padding:18px; }
+@media(max-width:900px) { .trace-kpis { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:700px) { .trace-kpi { min-height:66px; padding:7px; } .trace-kpi strong { font-size:17px; } .trace-chart { height:145px; } .recharts-legend-item-text { font-size:8px !important; } }
