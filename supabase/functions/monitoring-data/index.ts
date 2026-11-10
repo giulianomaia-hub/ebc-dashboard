@@ -11,6 +11,37 @@ function escapePromRegex(value: string) { return value.replace(/[\\.*+?^${}()|[\
 type Field = { name: string; labels?: Record<string,string>; type?: string }
 type Frame = { schema?: { fields?: Field[] }; data?: { values?: unknown[][] } }
 type QueryResult = { results?: Record<string, { frames?: Frame[]; error?: string }> }
+type TraceRow = { traceId: string; startTime: number; durationMs: number; error: boolean }
+function jaegerRows(frames: Frame[]): TraceRow[] {
+  const rows: TraceRow[] = []
+  for (const frame of frames) {
+    const fields = frame.schema?.fields ?? []
+    const columns = frame.data?.values ?? []
+    const idx = (names: string[]) => fields.findIndex(f => names.includes(f.name.toLowerCase()))
+    const idI = idx(['traceid', 'trace id', 'trace_id'])
+    const timeI = idx(['starttime', 'start time', 'start_time', 'time'])
+    const durI = idx(['duration', 'durationus', 'duration (µs)', 'duration (us)'])
+    const errorI = idx(['error', 'iserror', 'is_error'])
+    const n = Math.max(0, ...columns.map(c => c?.length ?? 0))
+    for (let i = 0; i < n; i++) {
+      const rawId = idI >= 0 ? columns[idI]?.[i] : `${frame.schema?.fields?.[0]?.name ?? 'trace'}-${i}`
+      const rawTime = timeI >= 0 ? columns[timeI]?.[i] : Date.now()
+      const rawDuration = durI >= 0 ? Number(columns[durI]?.[i]) : NaN
+      const rawError = errorI >= 0 ? columns[errorI]?.[i] : false
+      const t = Number(rawTime)
+      const startTime = Number.isFinite(t) ? (t > 1e17 ? t / 1e6 : t > 1e14 ? t / 1000 : t > 1e11 ? t : t * 1000) : Date.now()
+      if (!Number.isFinite(rawDuration)) continue
+      rows.push({ traceId: String(rawId), startTime, durationMs: rawDuration / 1000, error: rawError === true || String(rawError).toLowerCase() === 'true' })
+    }
+  }
+  return rows
+}
+function traceTimeline(rows: TraceRow[], range: string) {
+  const bucketMs = range === '24h' ? 15 * 60_000 : range === '6h' ? 5 * 60_000 : 60_000
+  const buckets = new Map<number, number[]>()
+  for (const row of rows) { const t = Math.floor(row.startTime / bucketMs) * bucketMs; if (!buckets.has(t)) buckets.set(t, []); buckets.get(t)!.push(row.durationMs) }
+  return [...buckets.entries()].sort((a,b)=>a[0]-b[0]).map(([time, ds]) => ({ time, averageMs: ds.reduce((a,b)=>a+b,0)/ds.length, maxMs: Math.max(...ds) }))
+}
 function framesFor(result: QueryResult, refId: string): Frame[] { return result.results?.[refId]?.frames ?? [] }
 function values(frame: Frame) {
   const fields=frame.schema?.fields??[], data=frame.data?.values??[]
@@ -28,24 +59,44 @@ function points(frames: Frame[]) {
   for(const frame of frames){const v=values(frame);v.nums.forEach((x,i)=>{const n=Number(x);if(Number.isFinite(n))out.push({time:Number(v.times[i]??Date.now()),value:n})})}
   return out
 }
+function frameLabels(frame: Frame): Record<string, string> {
+  const v = values(frame)
+  // No formato DataFrame do Grafana, os labels da série normalmente ficam
+  // associados ao campo numérico (Value), não necessariamente ao primeiro campo.
+  return v.fields[v.vi]?.labels
+    ?? v.fields.find(f => f.labels && Object.keys(f.labels).length > 0)?.labels
+    ?? {}
+}
+function displaySeriesName(labels: Record<string, string>, fallback = 'serviço') {
+  const image = labels.image
+  const imageName = image?.split('/').pop()?.replace(/:.*/, '')
+  return labels.app || imageName || labels.container || labels.name || labels.job || fallback
+}
 function seriesByName(frames: Frame[]) {
-  return frames.map(frame=>{
-    const v=values(frame)
-    const label=v.fields.find(f=>f.labels&&Object.keys(f.labels).length>0)
-    const name=label?.labels?.job || label?.labels?.app || label?.labels?.image?.split('/').pop()?.replace(/:.*/,'') || label?.labels?.container || label?.name || 'serviço'
-    const n=Number(v.nums.at(-1))
-    return {name,value:Number.isFinite(n)?n:0}
-  }).sort((a,b)=>b.value-a.value)
+  return frames.map(frame => {
+    const v = values(frame)
+    const labels = frameLabels(frame)
+    const name = displaySeriesName(labels, v.fields[v.vi]?.name || 'serviço')
+    const n = Number(v.nums.at(-1))
+    return { name, value: Number.isFinite(n) ? n : 0 }
+  }).sort((a, b) => b.value - a.value)
 }
 function timeSeries(frames: Frame[]) {
-  const map=new Map<number,Map<string,number>>()
-  for(const frame of frames){
-    const v=values(frame)
-    const label=v.fields.find(f=>f.labels&&Object.keys(f.labels).length>0)
-    const name=label?.labels?.job || label?.labels?.app || label?.name || 'serviço'
-    v.nums.forEach((x,i)=>{const n=Number(x),t=Number(v.times[i]);if(Number.isFinite(n)&&Number.isFinite(t)){if(!map.has(t))map.set(t,new Map());map.get(t)!.set(name,n)}})
+  const map = new Map<number, Map<string, number>>()
+  for (const frame of frames) {
+    const v = values(frame)
+    const labels = frameLabels(frame)
+    const name = displaySeriesName(labels, v.fields[v.vi]?.name || 'serviço')
+    v.nums.forEach((x, i) => {
+      const n = Number(x), t = Number(v.times[i])
+      if (Number.isFinite(n) && Number.isFinite(t)) {
+        if (!map.has(t)) map.set(t, new Map())
+        map.get(t)!.set(name, n)
+      }
+    })
   }
-  return [...map.entries()].sort((a,b)=>a[0]-b[0]).map(([time,m])=>({time,series:[...m.entries()].map(([name,value])=>({name,value}))}))
+  return [...map.entries()].sort((a, b) => a[0] - b[0])
+    .map(([time, m]) => ({ time, series: [...m.entries()].map(([name, value]) => ({ name, value })) }))
 }
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: cors })
@@ -78,33 +129,128 @@ Deno.serve(async (req) => {
       common('100 - (avg by (instance) (rate(node_cpu_seconds_total{job="node-exporter",mode="idle"}[5m])) * 100)','A'),
       common('(1 - (node_memory_MemAvailable_bytes{job="node-exporter"} / node_memory_MemTotal_bytes{job="node-exporter"})) * 100','B'),
       common('(1 - (node_filesystem_avail_bytes{job="node-exporter",mountpoint="/"} / node_filesystem_size_bytes{job="node-exporter",mountpoint="/"})) * 100','C'),
-      common(`count(count by (id) (container_last_seen{job="cadvisor",image=~"${imageRegex}"}))`,'D'),
+      common(`count(count by (id) (container_last_seen{job="cadvisor",image=~"${imageRegex}",image!="",id!="/"} > time() - 120))`,'D'),
       common('rate(node_network_receive_bytes_total{job="node-exporter",device!="lo"}[5m])','E',false),
       common('rate(node_network_transmit_bytes_total{job="node-exporter",device!="lo"}[5m])','F',false),
-      common(`topk(10,label_replace(sum by (image) (rate(container_cpu_usage_seconds_total{job="cadvisor",image=~"${imageRegex}"}[5m]))*100,"app","$1","image",".*/([^/:]+):.*"))`,'G'),
-      common(`topk(10,label_replace(sum by (image) (container_memory_usage_bytes{job="cadvisor",image=~"${imageRegex}"}),"app","$1","image",".*/([^/:]+):.*"))`,'H'),
-      common(`label_replace(sum by (image) (container_memory_usage_bytes{job="cadvisor",image=~"${imageRegex}"}),"app","$1","image",".*/([^/:]+):.*")`,'I'),
-      common(`label_replace(sum by (image) (rate(container_cpu_usage_seconds_total{job="cadvisor",image=~"${imageRegex}"}[5m]))*100,"app","$1","image",".*/([^/:]+):.*")`,'J'),
+      // Mesmas expressões PromQL fornecidas pelo usuário para os painéis do Grafana.
+      common(`topk(10, label_replace(sum by (image) (rate(container_cpu_usage_seconds_total{job="cadvisor", image=~"${imageRegex}"}[5m])) * 100, "app", "$1", "image", ".*/([^/:]+):.*"))`,'G'),
+      common(`topk(10, label_replace(sum by (image) (container_memory_usage_bytes{job="cadvisor", image=~"${imageRegex}"}), "app", "$1", "image", ".*/([^/:]+):.*"))`,'H'),
+      common(`label_replace(sum by (image) (container_memory_usage_bytes{job="cadvisor", image=~"${imageRegex}"}), "app", "$1", "image", ".*/([^/:]+):.*")`,'I'),
+      common(`label_replace(sum by (image) (rate(container_cpu_usage_seconds_total{job="cadvisor", image=~"${imageRegex}"}[5m])) * 100, "app", "$1", "image", ".*/([^/:]+):.*")`,'J'),
       common(`sum(${reqExpr})`,'K'),
       common(`100 * sum((sum by (job) (rate(http_server_duration_milliseconds_count{job=~"${serviceRegex}",http_status_code=~"5.."}[5m]))) or (sum by (job) (rate(http_server_request_duration_seconds_count{job=~"${serviceRegex}",http_response_status_code=~"5.."}[5m])))) / sum((sum by (job) (rate(http_server_duration_milliseconds_count{job=~"${serviceRegex}"}[5m]))) or (sum by (job) (rate(http_server_request_duration_seconds_count{job=~"${serviceRegex}"}[5m]))))`,'L'),
       common(reqExpr,'M',false),common(errExpr,'N',false),common(p95,'O',false),common(p99,'P',false)
     ]
-    const response=await fetch(`${grafanaUrl.replace(/\/$/,'')}/api/ds/query`,{method:'POST',headers:{Authorization:`Bearer ${grafanaToken}`,'Content-Type':'application/json'},body:JSON.stringify({from:String(from),to:String(now),queries})})
-    if(!response.ok){const detail=await response.text();console.error('Grafana query failed',response.status,detail.slice(0,500));return json({error:`Grafana não autorizou a consulta (HTTP ${response.status}). Verifique a conta técnica e a permissão da fonte Prometheus.`},502)}
-    const result=await response.json() as QueryResult
-    for(const ref of Object.keys(result.results??{}))if(result.results?.[ref]?.error)console.error(`Grafana ${ref}:`,result.results[ref].error)
+    // Consulta Prometheus isoladamente: uma falha no Jaeger não pode derrubar
+    // os indicadores de infraestrutura.
+    const grafanaBase = grafanaUrl.replace(/\/$/,'')
+    const response = await fetch(`${grafanaBase}/api/ds/query`, {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${grafanaToken}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: String(from), to: String(now), queries })
+    })
+    if (!response.ok) {
+      const detail = await response.text()
+      console.error('Grafana Prometheus query failed', response.status, detail.slice(0, 4000))
+      return json({ error: `Falha na consulta Prometheus (HTTP ${response.status}).` }, 502)
+    }
+    const result = await response.json() as QueryResult
+    for (const [ref, item] of Object.entries(result.results ?? {})) {
+      if (item?.error) console.error(`Grafana Prometheus ${ref}:`, item.error)
+    }
+
+    // Jaeger é consultado em uma segunda chamada independente. Erros nessa
+    // integração ficam restritos ao painel de traces.
+    let jaegerUid: string | null = null
+    let traceQueryFailed = false
+    try {
+      const dsResponse = await fetch(`${grafanaBase}/api/datasources`, {
+        headers: { Authorization: `Bearer ${grafanaToken}` }
+      })
+      if (!dsResponse.ok) {
+        console.error('Grafana datasource discovery failed', dsResponse.status, (await dsResponse.text()).slice(0, 2000))
+        traceQueryFailed = true
+      } else {
+        const sources = await dsResponse.json() as { uid?: string; type?: string; name?: string }[]
+        jaegerUid = sources.find(ds => ds.type === 'jaeger')?.uid ?? null
+      }
+    } catch (e) {
+      console.error('Não foi possível localizar a fonte Jaeger:', e)
+      traceQueryFailed = true
+    }
+
+    if (jaegerUid) {
+      const jaegerQuery = (refId: string, tags: string) => ({
+        refId,
+        datasource: { type: 'jaeger', uid: jaegerUid },
+        queryType: 'search',
+        service: rawService,
+        operation: '',
+        tags,
+        minDuration: '',
+        maxDuration: '',
+        limit: 100
+      })
+      // Mantidos exatamente os filtros informados nas capturas do Grafana.
+      const jaegerQueries = [
+        jaegerQuery('T', 'http.status_code=200 error=true'),
+        jaegerQuery('E2', 'error=true')
+      ]
+      try {
+        const jaegerResponse = await fetch(`${grafanaBase}/api/ds/query`, {
+          method: 'POST',
+          headers: { Authorization: `Bearer ${grafanaToken}`, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ from: String(from), to: String(now), queries: jaegerQueries })
+        })
+        const jaegerText = await jaegerResponse.text()
+        if (!jaegerResponse.ok) {
+          console.error('Grafana Jaeger query failed', jaegerResponse.status, jaegerText.slice(0, 4000))
+          traceQueryFailed = true
+        } else {
+          const jaegerResult = JSON.parse(jaegerText) as QueryResult
+          for (const [ref, item] of Object.entries(jaegerResult.results ?? {})) {
+            if (item?.error) {
+              console.error(`Grafana Jaeger ${ref}:`, item.error)
+              traceQueryFailed = true
+            }
+          }
+          result.results = { ...(result.results ?? {}), ...(jaegerResult.results ?? {}) }
+        }
+      } catch (e) {
+        console.error('Jaeger query exception:', e)
+        traceQueryFailed = true
+      }
+    } else {
+      console.warn('Fonte Jaeger não encontrada no Grafana; painel de traces ficará indisponível.')
+      traceQueryFailed = true
+    }
+
     const rx=points(framesFor(result,'E')),tx=points(framesFor(result,'F')),rxMap=new Map(rx.map(p=>[p.time,p.value])),txMap=new Map(tx.map(p=>[p.time,p.value]))
     const times=[...new Set([...rxMap.keys(),...txMap.keys()])].sort((a,b)=>a-b)
     const memoryMap=new Map(seriesByName(framesFor(result,'I')).map(x=>[x.name,x.value])),cpuMap=new Map(seriesByName(framesFor(result,'J')).map(x=>[x.name,x.value]))
     const names=[...new Set([...memoryMap.keys(),...cpuMap.keys()])]
     const serviceNames=[...new Set(['M','N','O','P'].flatMap(ref=>seriesByName(framesFor(result,ref)).map(x=>x.name)))].sort()
+    const traceRows = jaegerRows(framesFor(result,'T'))
+    const errorTraceRows = jaegerRows(framesFor(result,'E2'))
+    const uniqueTraces = [...new Map(traceRows.map(row => [row.traceId, row])).values()]
+    const uniqueErrors = new Set(errorTraceRows.map(row => row.traceId))
+    const traceDurations = uniqueTraces.map(row => row.durationMs).filter(Number.isFinite)
+    traceQueryFailed = traceQueryFailed || Boolean(result.results?.['T']?.error || result.results?.['E2']?.error)
+    const traces = jaegerUid && !traceQueryFailed ? {
+      total: uniqueTraces.length,
+      averageMs: traceDurations.length ? traceDurations.reduce((a,b)=>a+b,0)/traceDurations.length : null,
+      maxMs: traceDurations.length ? Math.max(...traceDurations) : null,
+      errorCount: uniqueErrors.size,
+      timeline: traceTimeline(uniqueTraces, range),
+      limit: 100
+    } : null
     return json({
       generatedAt:new Date().toISOString(),refreshSeconds:60,cpu:lastValue(framesFor(result,'A')),memory:lastValue(framesFor(result,'B')),disk:lastValue(framesFor(result,'C')),containers:lastValue(framesFor(result,'D')),
       network:times.map(time=>({time,rx:rxMap.get(time)??0,tx:txMap.get(time)??0})),
       cpuByImage:seriesByName(framesFor(result,'G')),memoryByImage:seriesByName(framesFor(result,'H')).map(x=>({...x,value:x.value/1024/1024})),
       table:names.map(name=>({name,memory:memoryMap.get(name)??0,cpu:cpuMap.get(name)??0})).sort((a,b)=>b.memory-a.memory),
       requestsPerSecond:lastValue(framesFor(result,'K')),errorRate:lastValue(framesFor(result,'L')),services:serviceNames,
-      requestsByService:timeSeries(framesFor(result,'M')),errorsByService:timeSeries(framesFor(result,'N')),latencyP95:timeSeries(framesFor(result,'O')),latencyP99:timeSeries(framesFor(result,'P'))
+      requestsByService:timeSeries(framesFor(result,'M')),errorsByService:timeSeries(framesFor(result,'N')),latencyP95:timeSeries(framesFor(result,'O')),latencyP99:timeSeries(framesFor(result,'P')),traces,traceSourceAvailable:Boolean(jaegerUid),traceQueryFailed
     })
   } catch(error) { console.error(error); return json({error:'Erro interno ao consultar o monitoramento.'},500) }
 })
